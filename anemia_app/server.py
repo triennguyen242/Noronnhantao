@@ -1,24 +1,25 @@
 import os
 import io
 import pathlib
+
 import numpy as np
 from PIL import Image
 
 import tensorflow as tf
 from tensorflow.keras.applications.efficientnet import preprocess_input
-
 from flask import Flask, request, jsonify
 
-# ========== CẤU HÌNH ==========
+# ================== CẤU HÌNH ================== #
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-# Đường dẫn tới file .tflite trong thư mục model
+
+# File .tflite đặt trong thư mục anemia_app/model/
 TFLITE_PATH = SCRIPT_DIR / "model" / "efficientnetb0_anemia_v2.tflite"
 
 IMG_SIZE = (224, 224)
-CLASS_NAMES = ["Anemia", "Non_anemia"]  # 0 = Anemia, 1 = Non_anemia
-THRESHOLD = 0.4  # ngưỡng dự đoán
+CLASS_NAMES = ["Anemia", "Non_anemia"]     # 0 = Anemia, 1 = Non_anemia
+THRESHOLD = 0.4                            # Ngưỡng quyết định
 
-# ========== LOAD TFLITE MODEL ==========
+# ================== LOAD TFLITE MODEL ================== #
 interpreter = tf.lite.Interpreter(model_path=str(TFLITE_PATH))
 interpreter.allocate_tensors()
 
@@ -29,15 +30,20 @@ app = Flask(__name__)
 
 
 def predict_pil_image(pil_img: Image.Image):
-    """Tiền xử lý ảnh PIL và chạy suy luận TFLite."""
+    """
+    Nhận ảnh PIL, tiền xử lý và chạy suy luận bằng TFLite.
+    Trả về: (label, p_anemia, p_non_anemia)
+    """
+    # Resize về đúng kích thước mô hình yêu cầu
     pil_img = pil_img.resize(IMG_SIZE)
+
     arr = np.array(pil_img).astype("float32")
 
-    # Ảnh xám -> nhân lên 3 kênh
+    # Ảnh xám: nhân lên 3 kênh
     if arr.ndim == 2:
         arr = np.stack([arr] * 3, axis=-1)
 
-    # Ảnh RGBA -> bỏ kênh alpha
+    # RGBA: bỏ kênh alpha
     if arr.shape[-1] == 4:
         arr = arr[:, :, :3]
 
@@ -45,6 +51,7 @@ def predict_pil_image(pil_img: Image.Image):
     arr = np.expand_dims(arr, axis=0)
     arr = preprocess_input(arr)
 
+    # Chạy mô hình TFLite
     interpreter.set_tensor(input_details[0]["index"], arr)
     interpreter.invoke()
     output = interpreter.get_tensor(output_details[0]["index"])
@@ -66,7 +73,7 @@ def predict():
     Trả về JSON:
     {
       "success": true/false,
-      "result": { ... } hoặc "error": "..."
+      "result": {...} hoặc "error": "..."
     }
     """
     if "file" not in request.files:
@@ -82,7 +89,7 @@ def predict():
 
         label, p_anemia, p_non_anemia = predict_pil_image(pil_img)
 
-        # Đổi nhãn sang tiếng Việt + confidence
+        # Đổi sang tiếng Việt + độ tin cậy
         if label == "Anemia":
             label_vi = "Thiếu máu"
             confidence = p_anemia
@@ -97,7 +104,7 @@ def predict():
                 "label_vi": label_vi,        # 'Thiếu máu' / 'Bình thường'
                 "prob_anemia": p_anemia,
                 "prob_non_anemia": p_non_anemia,
-                "confidence": confidence
+                "confidence": confidence     # xác suất của nhãn dự đoán
             }
         })
     except Exception as e:
@@ -110,6 +117,6 @@ def root():
 
 
 if __name__ == "__main__":
-    # Trên Render, PORT được truyền qua biến môi trường
+    # Render sẽ truyền PORT qua biến môi trường
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
